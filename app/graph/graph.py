@@ -30,7 +30,6 @@ Key design decisions:
 """
 
 import logging
-from functools import partial
 
 from langgraph.graph import END, StateGraph
 
@@ -91,8 +90,11 @@ async def save_watchlist_node(state: GraphState, config: dict) -> GraphState:
     Extracts the watch target from the raw_query and saves it to DB.
     This is a simple node — it does one DB insert and returns.
     """
-    from app.models.watchlist import WatchlistItem
+    from sqlalchemy import select
+
     from app.models.base import generate_uuid
+    from app.models.user import User
+    from app.models.watchlist import WatchlistItem
 
     db = config["configurable"]["db"]
     user_id = state["user_id"]
@@ -103,6 +105,16 @@ async def save_watchlist_node(state: GraphState, config: dict) -> GraphState:
     logger.info("[SaveWatchlist] Adding to watchlist for user %s", user_id)
 
     try:
+        # Validate user exists — prevents FK constraint error from PostgreSQL
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        if user_result.scalar_one_or_none() is None:
+            return {
+                **state,
+                "watchlist_item_id": None,
+                "error": f"User '{user_id}' not found — create an account first",
+                "error_node": "save_watchlist",
+            }
+
         item = WatchlistItem(
             id=generate_uuid(),
             user_id=user_id,

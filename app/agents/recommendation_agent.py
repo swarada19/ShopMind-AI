@@ -21,8 +21,6 @@ Why generate explanations with LLM?
   user's specific query — which is the core value proposition of ShopMind AI.
 """
 
-import logging
-
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.config import settings
@@ -92,9 +90,17 @@ def _score_products(
             review_count=p.get("review_count"),
         )
 
-        # Relevance: start with trust_score, boost for preferred brands
-        relevance = p.get("trust_score", 0.5)
+        # Relevance: trust_score base + keyword title match + preferred brand boost
+        relevance = p.get("trust_score") or 0.5
+        title_lower = (p.get("title") or "").lower()
         brand = (p.get("brand") or "").lower()
+
+        # Boost relevance for each query keyword found in the product title
+        keyword_hits = sum(1 for kw in query_keywords if kw and kw in title_lower)
+        if query_keywords:
+            relevance = min(relevance + (keyword_hits / len(query_keywords)) * 0.2, 1.0)
+
+        # Additional boost for preferred brands
         if any(b.lower() in brand for b in preferred_brands):
             relevance = min(relevance + 0.15, 1.0)
 

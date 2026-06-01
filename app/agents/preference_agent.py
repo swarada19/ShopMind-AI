@@ -20,8 +20,6 @@ Why is this a separate agent and not just part of the Orchestrator?
   without touching the Orchestrator's routing logic.
 """
 
-import logging
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

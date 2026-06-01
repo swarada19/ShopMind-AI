@@ -87,8 +87,11 @@ def _get_llm_chain():
 # ── Mock implementation ───────────────────────────────────────────────────────
 
 _WATCH_KEYWORDS = {"watch", "track", "alert", "notify", "monitor", "follow", "remind"}
+# Require EITHER a budget keyword before the number OR an explicit $ sign.
+# Making both optional was too greedy — it matched model numbers like "1000" in "WH-1000XM5".
 _BUDGET_PATTERN = re.compile(
-    r"(?:under|below|less than|max|budget|within|up to)?\s*\$?(\d+(?:\.\d{1,2})?)\s*(?:dollars?|usd)?",
+    r"(?:under|below|less than|max(?:imum)?|budget|within|up to)\s+\$?(\d+(?:\.\d{1,2})?)"
+    r"|\$(\d+(?:\.\d{1,2})?)",
     re.IGNORECASE,
 )
 _STOP_WORDS = {
@@ -107,9 +110,13 @@ def _mock_classify(raw_query: str) -> OrchestratorOutput:
     # Detect intent
     intent = "watch" if words & _WATCH_KEYWORDS else "search"
 
-    # Extract budget
+    # Extract budget — group(1) = keyword-prefixed number, group(2) = $-prefixed number
     budget_match = _BUDGET_PATTERN.search(raw_query)
-    extracted_budget = float(budget_match.group(1)) if budget_match else None
+    if budget_match:
+        raw_amount = budget_match.group(1) or budget_match.group(2)
+        extracted_budget = float(raw_amount) if raw_amount else None
+    else:
+        extracted_budget = None
 
     # Build clean product query (remove stop words + budget phrases)
     clean_words = [

@@ -20,7 +20,7 @@ Deduplication:
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,7 +88,7 @@ async def _check_and_alert(
     """Check a single watchlist item and send alert if price threshold is met."""
 
     # Get current price from mock data (or SerpAPI in production)
-    current_price = await _fetch_current_price(item.product_query, item.product_title)
+    current_price = _fetch_current_price(item.product_query, item.product_title)
 
     if current_price is None:
         logger.debug("[AlertAgent] No price found for '%s'", item.product_title[:50])
@@ -151,8 +151,8 @@ async def _check_and_alert(
     )
 
 
-async def _fetch_current_price(query: str, title: str) -> float | None:
-    """Fetch the current price for a watchlist item."""
+def _fetch_current_price(query: str, title: str) -> float | None:
+    """Fetch the current price for a watchlist item (synchronous — no I/O in mock mode)."""
     try:
         # In dev mode, use mock data. In production, this would call SerpAPI.
         results = mock_search_products(query=query, max_results=5)

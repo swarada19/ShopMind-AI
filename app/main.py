@@ -41,9 +41,17 @@ def create_app() -> FastAPI:
     # ── CORS ────────────────────────────────────────────────────────────────────
     # Allow Streamlit (running on localhost:8501) to call the API.
     # In production, replace "*" with your actual frontend domain.
+    # allow_origins=["*"] and allow_credentials=True cannot be combined per CORS spec —
+    # browsers reject such responses. In dev, list explicit localhost origins instead.
+    dev_origins = [
+        "http://localhost:8501",   # Streamlit default
+        "http://127.0.0.1:8501",
+        "http://localhost:3000",   # Future React/Vue frontend
+        "http://127.0.0.1:3000",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.is_development else ["https://yourdomain.com"],
+        allow_origins=dev_origins if settings.is_development else ["https://yourdomain.com"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

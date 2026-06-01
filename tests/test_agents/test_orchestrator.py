@@ -41,6 +41,16 @@ class TestMockClassification:
         result = _mock_classify("best gaming headphones")
         assert result.extracted_budget is None
 
+    def test_model_number_not_mistaken_for_budget(self):
+        """'WH-1000XM5' should NOT extract 1000 as a budget (Bug #6 regression)."""
+        result = _mock_classify("Sony WH-1000XM5 wireless headphones")
+        assert result.extracted_budget is None
+
+    def test_dollar_sign_extracts_budget(self):
+        """'$150' without a keyword prefix should still extract the budget."""
+        result = _mock_classify("wireless headphones $150")
+        assert result.extracted_budget == 150.0
+
     def test_product_query_cleaned(self):
         result = _mock_classify("find me the best wireless headphones")
         # Stop words like "find", "me", "the", "best" should be removed
