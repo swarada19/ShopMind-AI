@@ -14,10 +14,9 @@ Architecture note:
   - Sufficient for a portfolio project
   - Easy to understand and explain
   Trade-off: if the FastAPI process restarts, in-flight jobs are lost.
-  For production, move to Celery + Redis + persistent job store.
+  Production upgrade path: Celery + Redis + persistent job store.
 """
 
-import asyncio
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -34,22 +33,21 @@ async def _run_price_check_job() -> None:
     """
     The daily price check job.
 
-    Creates a new DB session (outside the FastAPI request cycle),
-    runs the Alert Agent, and logs the summary.
+    Uses get_async_session() — the correct way to acquire a DB session
+    outside of FastAPI's dependency injection system. The old code used
+    `async with AsyncSessionLocal() as db:` which crashed at runtime because
+    AsyncSessionLocal is a function returning the factory, not the factory
+    itself. get_async_session() is an explicit async context manager that
+    handles acquire, commit, and rollback correctly.
     """
     from app.agents.alert_agent import run_alert_check
-    from app.core.database import AsyncSessionLocal
+    from app.core.database import get_async_session
 
     logger.info("[Scheduler] Starting daily price check job")
 
-    async with AsyncSessionLocal() as db:
-        try:
-            summary = await run_alert_check(db)
-            await db.commit()
-            logger.info("[Scheduler] Price check complete: %s", summary)
-        except Exception as e:
-            await db.rollback()
-            logger.error("[Scheduler] Price check job failed: %s", str(e), exc_info=True)
+    async with get_async_session() as db:
+        summary = await run_alert_check(db)
+        logger.info("[Scheduler] Price check complete: %s", summary)
 
 
 def start_scheduler() -> None:
@@ -72,7 +70,7 @@ def start_scheduler() -> None:
 
     _scheduler.start()
     logger.info(
-        "[Scheduler] Started | price check at %02d:%02d UTC daily",
+        "[Scheduler] Started | price check scheduled at %02d:%02d UTC daily",
         settings.ALERT_SCHEDULE_HOUR,
         settings.ALERT_SCHEDULE_MINUTE,
     )
@@ -90,6 +88,7 @@ def trigger_price_check_now() -> None:
     """
     Manually trigger the price check job immediately.
     Useful for testing without waiting for the scheduled time.
+    Call via: POST /health/trigger-alerts (admin only in production).
     """
     if _scheduler:
         _scheduler.add_job(

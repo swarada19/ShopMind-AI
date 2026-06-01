@@ -3,16 +3,15 @@ app/models/preference.py
 
 User preference model — one-to-one with User.
 
-Stores a user's shopping preferences so the Preference Agent can personalise
-every search without requiring them to repeat themselves.
-
-JSONB columns (preferred_brands, preferred_categories) are used for list data
-because they allow efficient querying and are more flexible than separate
-junction tables for a portfolio project of this scale.
+JSONB vs JSON:
+  The ORM uses SQLAlchemy's generic `JSON` type, which maps to:
+    - JSONB in PostgreSQL (via the migration in migrations/versions/)
+    - TEXT with JSON serialisation in SQLite (used by tests)
+  Do not import `sqlalchemy.dialects.postgresql.JSONB` in model files —
+  that type is PostgreSQL-only and breaks `create_all()` on SQLite.
 """
 
-from sqlalchemy import Float, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Float, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -28,8 +27,8 @@ class UserPreference(Base, TimestampMixin):
     )
     max_budget: Mapped[float | None] = mapped_column(Float, nullable=True)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
-    preferred_brands: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
-    preferred_categories: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    preferred_brands: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    preferred_categories: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="preferences")

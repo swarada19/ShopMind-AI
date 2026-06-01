@@ -99,6 +99,34 @@ def api_post(path: str, data: dict) -> dict | None:
         return None
 
 
+def api_put(path: str, data: dict) -> dict | None:
+    try:
+        r = httpx.put(f"{API_BASE}{path}", json=data, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPStatusError as e:
+        detail = e.response.json().get("detail", str(e))
+        st.error(f"API error: {detail}")
+        return None
+    except Exception as e:
+        st.error(f"Could not connect to backend: {e}")
+        return None
+
+
+def api_delete(path: str) -> bool:
+    """Returns True on success (204 No Content), False otherwise."""
+    try:
+        r = httpx.delete(f"{API_BASE}{path}", timeout=10)
+        r.raise_for_status()
+        return True
+    except httpx.HTTPStatusError as e:
+        st.error(f"Delete failed: {e.response.json().get('detail', str(e))}")
+        return False
+    except Exception as e:
+        st.error(f"Could not connect to backend: {e}")
+        return False
+
+
 def render_score_bar(label: str, score: float, color: str = "#7c3aed"):
     pct = int(score * 100)
     st.markdown(f"""
@@ -348,10 +376,7 @@ with tab_watchlist:
                         )
                         with cols[3]:
                             if st.button("❌", key=f"del_{item['id']}"):
-                                r = httpx.delete(
-                                    f"{API_BASE}/watchlist/{st.session_state['user_id']}/{item['id']}"
-                                )
-                                if r.status_code == 204:
+                                if api_delete(f"/watchlist/{st.session_state['user_id']}/{item['id']}"):
                                     st.success("Removed")
                                     st.rerun()
                         st.caption(f"Added {item.get('created_at', '')[:10]} · Alerts sent: {item.get('alert_sent_count', 0)}")
@@ -416,18 +441,15 @@ with tab_settings:
                 brands = [b.strip() for b in brands_input.split(",") if b.strip()]
                 cats = [c.strip() for c in categories_input.split(",") if c.strip()]
 
-                result = httpx.put(
-                    f"{API_BASE}/users/{st.session_state['user_id']}/preferences",
-                    json={
+                saved = api_put(
+                    f"/users/{st.session_state['user_id']}/preferences",
+                    {
                         "max_budget": budget if budget > 0 else None,
                         "currency": "USD",
                         "preferred_brands": brands,
                         "preferred_categories": cats,
                         "notes": notes or None,
                     },
-                    timeout=10,
                 )
-                if result.status_code == 200:
+                if saved:
                     st.success("✅ Preferences saved! They'll be applied on your next search.")
-                else:
-                    st.error(f"Failed to save: {result.text}")

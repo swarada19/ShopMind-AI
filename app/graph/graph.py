@@ -3,34 +3,31 @@ app/graph/graph.py
 
 LangGraph StateGraph construction for ShopMind AI.
 
-This file wires all agents into a directed graph with conditional routing.
-
 Graph topology:
 
-  START
-    │
-    ▼
-  [orchestrator] ──── conditional edge ──────────────┐
-    │                                                 │
-    │ intent="search"                   intent="watch"│
-    ▼                                                 ▼
-  [preference] ──► [product_intelligence] ──► [recommendation]
-                                                      │
-                                                  [save_watchlist]
-                                                      │
-                                                     END
+  START → [orchestrator] → route_intent()
+    ├─ "search" → [preference] → [product_intelligence] → [recommendation] → END
+    ├─ "watch"  → [save_watchlist] → END
+    └─ "end"    → END  (unknown intent or orchestrator failure)
 
 Key design decisions:
-1. Database sessions: Nodes that need DB access receive a session via
-   LangGraph's `RunnableConfig`. We pass `db` in config["configurable"]["db"].
-2. The graph is compiled ONCE at startup and reused for all requests.
-   LangGraph compiled graphs are stateless and thread-safe.
-3. Error field: if any node sets `error`, the graph continues but downstream
-   nodes check it. This gives graceful degradation rather than hard crashes.
+1. DB sessions: nodes that need DB access receive an AsyncSession via
+   LangGraph's RunnableConfig: config["configurable"]["db"].
+   RunnableConfig is the correct type annotation — using `dict` causes
+   LangGraph to skip config injection entirely (confirmed bug in 0.2.x).
+
+2. Graph singleton: compiled once at startup, reused across requests.
+   The compiled graph is stateless — state lives entirely in the dict
+   passed to ainvoke(), so concurrent requests never interfere.
+
+3. Error propagation: no node raises unhandled exceptions. Failures set
+   state["error"] and state["error_node"]; downstream nodes degrade
+   gracefully rather than crashing.
 """
 
 import logging
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 from app.agents.orchestrator import orchestrator_node
@@ -41,55 +38,29 @@ from app.graph.state import GraphState
 
 logger = logging.getLogger(__name__)
 
+
 # ── Node wrappers ─────────────────────────────────────────────────────────────
-# LangGraph nodes receive only `state` by default.
-# We wrap DB-dependent nodes to extract `db` from LangGraph's config object.
+# LangGraph only injects `config` when it is typed as RunnableConfig.
+# Using `dict` silently skips the injection, causing a missing-argument error.
 
-
-async def _preference_node_wrapper(state: GraphState, config: dict) -> GraphState:
+async def _preference_node_wrapper(
+    state: GraphState, config: RunnableConfig
+) -> GraphState:
     db = config["configurable"]["db"]
     return await preference_node(state, db)
 
 
-async def _product_intelligence_wrapper(state: GraphState, config: dict) -> GraphState:
+async def _product_intelligence_wrapper(
+    state: GraphState, config: RunnableConfig
+) -> GraphState:
     db = config["configurable"]["db"]
     return await product_intelligence_node(state, db)
 
 
-# ── Router ────────────────────────────────────────────────────────────────────
-
-def route_intent(state: GraphState) -> str:
-    """
-    Conditional edge function: determine next node based on Orchestrator output.
-
-    Returns a string key that maps to the next node name.
-    LangGraph matches this string against the dict passed to
-    `add_conditional_edges`.
-    """
-    intent = state.get("intent", "unknown")
-
-    if state.get("error") and state.get("error_node") == "orchestrator":
-        logger.warning("[Router] Orchestrator failed — routing to END")
-        return "end"
-
-    if intent == "watch":
-        return "watch"
-    elif intent == "search":
-        return "search"
-    else:
-        logger.info("[Router] Unknown intent for query: '%s'", state.get("raw_query", ""))
-        return "end"
-
-
-# ── Save watchlist node ───────────────────────────────────────────────────────
-
-async def save_watchlist_node(state: GraphState, config: dict) -> GraphState:
-    """
-    LangGraph node: save a product to the user's watchlist.
-
-    Extracts the watch target from the raw_query and saves it to DB.
-    This is a simple node — it does one DB insert and returns.
-    """
+async def save_watchlist_node(
+    state: GraphState, config: RunnableConfig
+) -> GraphState:
+    """LangGraph node: save a product to the user's watchlist."""
     from sqlalchemy import select
 
     from app.models.base import generate_uuid
@@ -111,6 +82,7 @@ async def save_watchlist_node(state: GraphState, config: dict) -> GraphState:
             return {
                 **state,
                 "watchlist_item_id": None,
+                "recommendations": [],
                 "error": f"User '{user_id}' not found — create an account first",
                 "error_node": "save_watchlist",
             }
@@ -126,73 +98,70 @@ async def save_watchlist_node(state: GraphState, config: dict) -> GraphState:
         db.add(item)
         await db.flush()
 
-        return {
-            **state,
-            "watchlist_item_id": item.id,
-            "recommendations": [],
-        }
+        return {**state, "watchlist_item_id": item.id, "recommendations": []}
 
     except Exception as e:
         logger.error("[SaveWatchlist] Failed: %s", str(e))
         return {
             **state,
             "watchlist_item_id": None,
+            "recommendations": [],
             "error": f"Watchlist save failed: {e}",
             "error_node": "save_watchlist",
         }
 
 
+# ── Router ────────────────────────────────────────────────────────────────────
+
+def route_intent(state: GraphState) -> str:
+    """Conditional edge: determine next node from Orchestrator output."""
+    if state.get("error") and state.get("error_node") == "orchestrator":
+        logger.warning("[Router] Orchestrator failed — routing to END")
+        return "end"
+
+    intent = state.get("intent", "unknown")
+    if intent == "watch":
+        return "watch"
+    elif intent == "search":
+        return "search"
+    else:
+        logger.info("[Router] Unknown intent: '%s'", state.get("raw_query", ""))
+        return "end"
+
+
 # ── Graph construction ────────────────────────────────────────────────────────
 
 def build_graph() -> StateGraph:
-    """Build and compile the ShopMind AI StateGraph."""
-
+    """Build the ShopMind AI StateGraph."""
     graph = StateGraph(GraphState)
 
-    # Register nodes
     graph.add_node("orchestrator", orchestrator_node)
     graph.add_node("preference", _preference_node_wrapper)
     graph.add_node("product_intelligence", _product_intelligence_wrapper)
     graph.add_node("recommendation", recommendation_node)
     graph.add_node("save_watchlist", save_watchlist_node)
 
-    # Entry point
     graph.set_entry_point("orchestrator")
 
-    # Conditional routing from orchestrator
     graph.add_conditional_edges(
         "orchestrator",
         route_intent,
-        {
-            "search": "preference",
-            "watch": "save_watchlist",
-            "end": END,
-        },
+        {"search": "preference", "watch": "save_watchlist", "end": END},
     )
 
-    # Linear search path
     graph.add_edge("preference", "product_intelligence")
     graph.add_edge("product_intelligence", "recommendation")
     graph.add_edge("recommendation", END)
-
-    # Watch path ends after saving
     graph.add_edge("save_watchlist", END)
 
     return graph
 
 
-# Module-level compiled graph (built once, reused per request)
 _compiled_graph = None
 
 
 def get_compiled_graph():
-    """
-    Return the compiled graph singleton.
-
-    Using a singleton avoids rebuilding the graph on every request.
-    The compiled graph is stateless — all state lives in the `state` dict
-    passed to ainvoke(), so concurrent requests don't interfere.
-    """
+    """Return the compiled graph singleton (built once, reused per request)."""
     global _compiled_graph
     if _compiled_graph is None:
         _compiled_graph = build_graph().compile()

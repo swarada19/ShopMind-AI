@@ -1,12 +1,20 @@
-[tool.ruff]
+# Standalone ruff.toml — uses section names WITHOUT the [tool.ruff] prefix.
+# (The [tool.ruff.*] format is only valid inside pyproject.toml.)
+
 line-length = 100
 target-version = "py312"
-exclude = [".venv", "migrations"]
+exclude = [".venv", "migrations", "__pycache__"]
 
-[tool.ruff.lint]
+[lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501", "B008", "UP007"]  # B008: FastAPI Depends() in defaults is intentional
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "B008",   # FastAPI Depends() in function defaults is intentional
+    "UP007",  # Use X | Y syntax — already doing that
+    "SIM108", # ternary operator — sometimes less readable
+]
 
-[tool.ruff.format]
+[format]
 quote-style = "double"
 indent-style = "space"
+skip-magic-trailing-comma = false

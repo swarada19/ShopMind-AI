@@ -11,6 +11,7 @@ requiring asyncpg to be installed in test environments that use SQLite.
 
 import logging
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -22,7 +23,6 @@ from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
 
-# Module-level variables — populated by init_db() on first access
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker | None = None
 
@@ -38,7 +38,7 @@ def init_db(database_url: str | None = None) -> None:
 
     Args:
         database_url: Override the DATABASE_URL from settings.
-                      Used by tests to substitute SQLite.
+                      Used by tests to substitute SQLite in-memory.
     """
     global _engine, _session_factory
 
@@ -50,7 +50,6 @@ def init_db(database_url: str | None = None) -> None:
         url,
         echo=settings.APP_DEBUG,
         pool_pre_ping=True,
-        # SQLite doesn't support pool_size — only set these for PostgreSQL
         **({} if url.startswith("sqlite") else {"pool_size": 10, "max_overflow": 20}),
     )
 
@@ -62,7 +61,7 @@ def init_db(database_url: str | None = None) -> None:
         autocommit=False,
     )
 
-    logger.debug("Database engine initialised: %s", url.split("@")[-1])  # log host only
+    logger.debug("Database engine initialised: %s", url.split("@")[-1])
 
 
 def _get_engine() -> AsyncEngine:
@@ -77,17 +76,39 @@ def _get_session_factory() -> async_sessionmaker:
     return _session_factory  # type: ignore[return-value]
 
 
-# Make these accessible as module-level attributes for convenience
-class _EngineProxy:
-    def __getattr__(self, name: str):
-        return getattr(_get_engine(), name)
-
-
-AsyncSessionLocal = _get_session_factory  # callable that returns session factory
-
-
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency: provides a DB session per request."""
+    """
+    FastAPI dependency: provides a database session per request.
+
+    Usage:
+        @router.get("/items")
+        async def handler(db: AsyncSession = Depends(get_db)):
+            ...
+    """
+    factory = _get_session_factory()
+    async with factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+@asynccontextmanager
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Context manager for acquiring a session outside of FastAPI's DI system.
+
+    Use this in the scheduler and any other non-request code that needs
+    database access. Handles commit/rollback automatically.
+
+    Usage:
+        async with get_async_session() as db:
+            results = await db.execute(select(User))
+    """
     factory = _get_session_factory()
     async with factory() as session:
         try:
@@ -101,7 +122,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def create_tables() -> None:
-    """Create all tables. For testing and initial setup."""
+    """Create all tables. For testing and initial dev setup."""
     engine = _get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

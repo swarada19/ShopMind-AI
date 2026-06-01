@@ -7,17 +7,14 @@ Products are fetched from SerpAPI and stored here with a fetched_at timestamp.
 The Product Intelligence Agent checks this table first (TTL cache pattern)
 before calling SerpAPI, preventing redundant API calls and improving latency.
 
-Why store in PostgreSQL and not Redis?
-- PostgreSQL is already in the stack.
-- Product data is richer than a simple key-value cache.
-- We need to query across products (e.g., "find all cached Sony headphones").
-- For this scale, PostgreSQL's performance is more than sufficient.
+Note on JSON vs JSONB:
+  Models use generic `JSON` (cross-database). The Alembic migration explicitly
+  uses `JSONB` for PostgreSQL to enable index-based queries on JSON fields.
 """
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import DateTime, Float, Integer, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -28,7 +25,6 @@ class Product(Base, TimestampMixin):
     __tablename__ = "products"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    # External identifier (from SerpAPI) — unique per source
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -41,9 +37,8 @@ class Product(Base, TimestampMixin):
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(50), default="serpapi", nullable=False)
-    features: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    features: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     trust_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # The search query that produced this product — used for TTL cache lookup
     search_query: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
