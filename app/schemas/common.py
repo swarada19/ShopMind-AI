@@ -1,0 +1,18 @@
+"""
+app/schemas/common.py
+
+Shared Pydantic schemas used across multiple API responses.
+"""
+
+from pydantic import BaseModel
+
+
+class SuccessResponse(BaseModel):
+    success: bool = True
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    success: bool = False
+    error: str
+    detail: str | None = None
