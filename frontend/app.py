@@ -13,6 +13,8 @@ Pages / tabs:
   ⚙️ Settings  — User preferences
 """
 
+import os
+
 import httpx
 import streamlit as st
 
@@ -24,7 +26,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-API_BASE = "http://localhost:8000"
+# Read from environment so Docker Compose can inject the container hostname.
+# Falls back to localhost for local dev outside Docker.
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
 
 # ── Custom CSS ───────────────────────────────────────────────────────────────
 st.markdown("""

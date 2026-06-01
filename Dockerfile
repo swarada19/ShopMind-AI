@@ -33,4 +33,6 @@ USER shopmind
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run Alembic migrations then start Uvicorn.
+# Migrations must run before the app starts so the DB schema is ready.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

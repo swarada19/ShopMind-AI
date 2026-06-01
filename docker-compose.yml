@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: shopmind_pass
       POSTGRES_DB: shopmind_db
     ports:
-      - "5432:5432"
+      - "5433:5432"    # host 5433 → container 5432 (avoids conflict with other local DBs)
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -28,9 +28,10 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      # Override DB URLs to use the container hostname
+      # Override values from .env for the container environment
       DATABASE_URL: postgresql+asyncpg://shopmind:shopmind_pass@postgres:5432/shopmind_db
       SYNC_DATABASE_URL: postgresql+psycopg2://shopmind:shopmind_pass@postgres:5432/shopmind_db
+      APP_DEBUG: "false"   # Silence SQLAlchemy query logs in containers
     ports:
       - "8000:8000"
     volumes:
