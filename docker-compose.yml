@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shopmind_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shopmind
+      POSTGRES_PASSWORD: shopmind_pass
+      POSTGRES_DB: shopmind_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopmind -d shopmind_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shopmind_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Override DB URLs to use the container hostname
+      DATABASE_URL: postgresql+asyncpg://shopmind:shopmind_pass@postgres:5432/shopmind_db
+      SYNC_DATABASE_URL: postgresql+psycopg2://shopmind:shopmind_pass@postgres:5432/shopmind_db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mock_data:/app/mock_data:ro
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: shopmind_frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_BASE: http://api:8000
+    ports:
+      - "8501:8501"
+
+volumes:
+  postgres_data:
+    driver: local
