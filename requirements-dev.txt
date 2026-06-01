@@ -1,0 +1,14 @@
+# Install production deps first
+-r requirements.txt
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.3.3
+pytest-asyncio==0.24.0   # async test support
+pytest-cov==6.0.0        # code coverage reports
+httpx==0.27.2            # test FastAPI without a live server
+
+# ── Code Quality ─────────────────────────────────────────────────────────────
+ruff==0.8.0              # fast linter + formatter (replaces flake8 + black)
+
+# ── Type Checking ────────────────────────────────────────────────────────────
+mypy==1.13.0
